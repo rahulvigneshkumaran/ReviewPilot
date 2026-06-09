@@ -1,0 +1,47 @@
+[
+  {
+    "file_name": "owasp_sql_injection.md",
+    "rule_category": "SECURITY",
+    "text_content": "OWASP Top 10 Guideline: Prevent SQL Injection. Never concatenate or format raw user inputs directly into query strings. Always utilize parameterized SQL statements, SQLAlchemy bind parameters, or ORM methodologies to query databases securely."
+  },
+  {
+    "file_name": "owasp_xss_and_injection.md",
+    "rule_category": "SECURITY",
+    "text_content": "OWASP Top 10 Guideline: Prevent Command Injection and Cross-Site Scripting (XSS). Avoid running raw shell inputs using subprocess or os.system with raw strings. Sanitize inputs and validate templates to prevent dynamic scripting injections."
+  },
+  {
+    "file_name": "solid_single_responsibility.md",
+    "rule_category": "SOLID",
+    "text_content": "SOLID Architecture: Single Responsibility Principle (SRP). A class or function should have one, and only one, reason to change. Separate business logic from integration clients, routers, or representation formatting."
+  },
+  {
+    "file_name": "solid_interface_segregation.md",
+    "rule_category": "SOLID",
+    "text_content": "SOLID Architecture: Interface Segregation and Dependency Inversion. Avoid forcing clients to depend on methods they do not use. High-level modules should not depend on low-level modules; both should depend on abstractions."
+  },
+  {
+    "file_name": "clean_code_exception_handling.md",
+    "rule_category": "CODE_QUALITY",
+    "text_content": "Clean Code Standard: Proper Exception Handling. Never use bare exceptions like 'except:' or catch base exceptions 'except Exception:' silently unless logging and raising. Catch specific exceptions (e.g., KeyError, ValueError) to keep code logic clear and debuggable."
+  },
+  {
+    "file_name": "clean_code_naming.md",
+    "rule_category": "CODE_QUALITY",
+    "text_content": "Clean Code Standard: Meaningful Names. Use clear, intention-revealing variable, class, and method names. Avoid magic numbers and obscure abbreviations. Functions should be small and do one thing."
+  },
+  {
+    "file_name": "performance_database_queries.md",
+    "rule_category": "PERFORMANCE",
+    "text_content": "Performance Standard: Database Connection and Query Optimization. Avoid N+1 queries. Use joinedload or selectinload in SQLAlchemy for eager loading of relationships. Ensure appropriate database indexes exist for lookup parameters."
+  },
+  {
+    "file_name": "performance_loops_and_io.md",
+    "rule_category": "PERFORMANCE",
+    "text_content": "Performance Standard: Efficient Loops and Async IO. Avoid performing block-level IO requests (like HTTP get or database queries) inside loops. Batch transactions or resolve queries concurrently using asyncio.gather."
+  },
+  {
+    "file_name": "testing_missing_coverage.md",
+    "rule_category": "TEST",
+    "text_content": "Testing Guideline: Comprehensive Test Coverage. New business logic, models, or endpoints should include unit tests asserting edge cases, inputs validation, error handling, and expected behaviors."
+  }
+]

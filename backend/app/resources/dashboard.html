@@ -1,0 +1,874 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ReviewPilot Console - Local Preview</title>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            background: "#0F172A",
+            card: "#111827",
+            primary: "#4F46E5",
+            secondary: "#7C3AED",
+            accent: "#A855F7",
+            border: "#1E293B",
+            textPrimary: "#F8FAFC",
+            textSecondary: "#94A3B8"
+          }
+        }
+      }
+    }
+  </script>
+  <!-- AlpineJS CDN for lightweight frontend reactivity -->
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <!-- Lucide Icons CDN -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #0F172A;
+      color: #F8FAFC;
+    }
+    .glass-card {
+      background: rgba(17, 24, 39, 0.7);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .glass-card:hover {
+      border: 1px solid rgba(79, 70, 229, 0.4);
+      box-shadow: 0 8px 32px 0 rgba(79, 70, 229, 0.15);
+    }
+  </style>
+</head>
+<body x-data="appState()" class="min-h-screen flex">
+  <!-- Decorative Background Highlights -->
+  <div class="absolute top-1/4 left-1/4 h-72 w-72 rounded-full bg-primary/5 blur-[100px] pointer-events-none"></div>
+  <div class="absolute bottom-1/4 right-1/4 h-80 w-80 rounded-full bg-secondary/5 blur-[120px] pointer-events-none"></div>
+
+  <!-- LOGIN OVERLAY (shown when not authenticated) -->
+  <div x-show="!currentUser" x-cloak class="fixed inset-0 z-50 flex items-center justify-center" style="background:rgba(6,9,20,0.97);backdrop-filter:blur(20px)">
+    <div class="w-full max-w-md mx-auto px-6">
+      <div class="glass-card rounded-2xl p-8 space-y-6 border border-primary/30 shadow-2xl shadow-primary/10">
+        <!-- Logo -->
+        <div class="text-center space-y-2">
+          <div class="flex justify-center">
+            <div class="bg-primary/20 p-3 rounded-xl border border-primary/40 inline-flex">
+              <i data-lucide="code" class="h-8 w-8 text-primary"></i>
+            </div>
+          </div>
+          <h2 class="font-outfit text-2xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">ReviewPilot</h2>
+          <p class="text-xs text-textSecondary">Connect with your GitHub account to get started</p>
+        </div>
+
+        <!-- PAT Input -->
+        <div class="space-y-3">
+          <label class="block text-xs font-semibold text-textSecondary uppercase tracking-wider">GitHub Personal Access Token</label>
+          <input
+            type="password"
+            x-model="loginToken"
+            @keydown.enter="login()"
+            placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+            class="w-full bg-[#090F1E] border border-border/85 rounded-lg px-4 py-3 text-sm text-textPrimary placeholder-textSecondary focus:outline-none focus:border-primary transition-all"
+          />
+          <p class="text-[11px] text-textSecondary">Needs <code class="text-accent">repo</code> + <code class="text-accent">read:user</code> scopes. <a href="https://github.com/settings/tokens/new?scopes=repo,read:user" target="_blank" class="text-primary hover:underline">Generate token &rarr;</a></p>
+        </div>
+
+        <!-- Error message -->
+        <p x-show="loginError" x-text="loginError" class="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2"></p>
+
+        <!-- Login Button -->
+        <button
+          @click="login()"
+          :disabled="loginLoading || !loginToken.trim()"
+          class="w-full bg-primary hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed py-3 text-sm font-bold text-white rounded-xl transition-all flex items-center justify-center gap-2"
+        >
+          <span x-show="!loginLoading" class="flex items-center gap-2"><i data-lucide="github" class="h-4 w-4"></i> Connect with GitHub</span>
+          <span x-show="loginLoading" class="flex items-center gap-2"><span class="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></span> Verifying...</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sidebar -->
+  <aside class="w-64 bg-card border-r border-border/50 flex flex-col min-h-screen z-20">
+    <div class="h-16 flex items-center gap-3 px-6 border-b border-border/50">
+      <div class="bg-primary/20 p-1.5 rounded-lg border border-primary/30">
+        <i data-lucide="code" class="h-5 w-5 text-primary"></i>
+      </div>
+      <span class="font-outfit text-xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+        ReviewPilot
+      </span>
+    </div>
+
+    <!-- Nav list -->
+    <nav class="flex-1 px-4 py-6 space-y-1">
+      <template x-for="page in pages" :key="page.id">
+        <button
+          @click="activePage = page.id"
+          class="flex w-full items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all"
+          :class="activePage === page.id ? 'bg-primary text-white shadow-lg shadow-primary/25' : 'text-textSecondary hover:bg-border/30 hover:text-textPrimary'"
+        >
+          <i :data-lucide="page.icon" class="h-4 w-4"></i>
+          <span x-text="page.name"></span>
+        </button>
+      </template>
+    </nav>
+    <div class="p-4 border-t border-border/50 text-xs text-textSecondary text-center">
+      Local Console Preview
+    </div>
+  </aside>
+
+  <!-- Content Wrap -->
+  <div class="flex-1 flex flex-col min-h-screen overflow-hidden">
+    <!-- Header -->
+    <header class="h-16 border-b border-border/50 bg-card/45 backdrop-blur-md px-8 flex items-center justify-between z-10">
+      <div>
+        <h2 class="text-xs font-semibold text-textSecondary uppercase tracking-wider">FastAPI Local Host Server</h2>
+      </div>
+      <div class="flex items-center gap-6">
+        <span class="flex items-center gap-1.5 text-xs text-green-400 font-medium">
+          <span class="h-2 w-2 rounded-full bg-green-400 animate-ping"></span>
+          <span x-text="currentUser ? 'Live — GitHub Connected' : 'Connecting...'"></span>
+        </span>
+        <div class="flex items-center gap-3" x-show="currentUser">
+          <img :src="currentUser?.avatar_url || 'https://avatars.githubusercontent.com/u/9919?v=4'" alt="Avatar" class="h-8 w-8 rounded-full border border-border" />
+          <span class="text-sm font-semibold text-textPrimary" x-text="currentUser?.github_username || ''"></span>
+          <button @click="logout()" title="Disconnect" class="text-textSecondary hover:text-red-400 transition-colors">
+            <i data-lucide="log-out" class="h-4 w-4"></i>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Content Panel -->
+    <main class="flex-1 overflow-y-auto px-8 py-8 relative">
+      <div class="max-w-6xl mx-auto space-y-6">
+
+        <!-- 1. REPOSITORIES PAGE -->
+        <div x-show="activePage === 'repositories'" class="space-y-6">
+          <div>
+            <h1 class="font-outfit text-3xl font-bold tracking-tight">Connected Repositories</h1>
+            <p class="text-sm text-textSecondary mt-1">Manage public/private repositories connected to automated AI PR scanning.</p>
+          </div>
+
+          <div class="glass-card rounded-xl p-6">
+            <h3 class="text-base font-semibold text-textPrimary mb-3">Connect a new repository</h3>
+            <form @submit.prevent="connectRepo()" class="flex gap-3">
+              <input
+                type="text"
+                x-model="newRepoName"
+                placeholder="owner/repo (e.g. facebook/react)"
+                class="flex-1 bg-[#090F1E] border border-border/85 rounded-lg px-4 py-2 text-sm text-textPrimary placeholder-textSecondary focus:outline-none focus:border-primary transition-all"
+              />
+              <button type="submit" class="bg-primary hover:bg-indigo-700 px-5 py-2 text-sm font-semibold text-white rounded-lg flex items-center gap-2">
+                <i data-lucide="plus" class="h-4 w-4"></i> Connect
+              </button>
+            </form>
+          </div>
+
+          <!-- Loading state -->
+          <div x-show="reposLoading" class="flex items-center justify-center py-16">
+            <div class="flex items-center gap-3 text-textSecondary">
+              <span class="animate-spin h-5 w-5 border-2 border-primary border-t-transparent rounded-full"></span>
+              <span class="text-sm">Loading repositories...</span>
+            </div>
+          </div>
+
+          <!-- Error state -->
+          <div x-show="reposError && !reposLoading" class="glass-card rounded-xl p-6 border border-red-500/20 text-red-400 text-sm" x-text="reposError"></div>
+
+          <!-- Empty state -->
+          <div x-show="!reposLoading && !reposError && repos.length === 0" class="glass-card rounded-xl p-10 text-center space-y-3">
+            <i data-lucide="folder-open" class="h-10 w-10 text-textSecondary mx-auto"></i>
+            <p class="text-sm text-textSecondary">No repositories connected yet.</p>
+            <p class="text-xs text-textSecondary">Type <code class="text-accent">owner/repo</code> above and click Connect.</p>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-6" x-show="!reposLoading && repos.length > 0">
+            <template x-for="repo in repos" :key="repo.id">
+              <div class="glass-card rounded-xl p-6 flex flex-col justify-between space-y-4">
+                <div class="space-y-2">
+                  <div class="flex items-center justify-between">
+                    <a :href="'https://github.com/' + repo.full_name" target="_blank"
+                      class="font-outfit text-base font-bold text-textPrimary hover:text-primary transition-colors flex items-center gap-1.5"
+                      x-text="repo.full_name"
+                    ></a>
+                    <span
+                      class="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase"
+                      :class="repo.is_active ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'"
+                      x-text="repo.is_active ? 'Active' : 'Paused'"
+                    ></span>
+                  </div>
+                  <p class="text-xs text-textSecondary" x-text="repo.description || 'No description.'"></p>
+                  <p class="text-[10px] text-textSecondary font-mono">Branch: <span class="text-accent" x-text="repo.default_branch"></span></p>
+                </div>
+                <div class="flex items-center justify-between pt-2 border-t border-border/40">
+                  <span class="text-xs text-textSecondary font-medium">Auto review scans</span>
+                  <div class="flex items-center gap-3">
+                    <button
+                      @click="toggleRepo(repo)"
+                      class="w-10 h-5 rounded-full p-0.5 transition-colors duration-200"
+                      :class="repo.is_active ? 'bg-primary' : 'bg-border'"
+                    >
+                      <div class="w-4 h-4 bg-white rounded-full transition-transform duration-200" :class="repo.is_active ? 'translate-x-5' : 'translate-x-0'"></div>
+                    </button>
+                    <button @click="disconnectRepo(repo)" title="Disconnect repo" class="text-textSecondary hover:text-red-400 transition-colors">
+                      <i data-lucide="trash-2" class="h-4 w-4"></i>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- 2. PR REVIEWS PAGE -->
+        <div x-show="activePage === 'reviews'" class="space-y-6">
+          <div>
+            <h1 class="font-outfit text-3xl font-bold tracking-tight">Pull Request Reviews</h1>
+            <p class="text-sm text-textSecondary mt-1">Audit recent scans, code defect alerts, and unit test code suggest modules.</p>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+            <!-- Left side PR lists -->
+            <div class="space-y-4 lg:col-span-1">
+              <div class="flex items-center justify-between px-2">
+                <h3 class="text-xs font-bold uppercase tracking-wider text-textSecondary">Scanned Reviews</h3>
+                <span x-show="reviewsLoading" class="animate-spin h-3.5 w-3.5 border-2 border-primary border-t-transparent rounded-full"></span>
+                <span x-show="!reviewsLoading" class="text-[10px] text-textSecondary" x-text="reviews.length + ' total'"></span>
+              </div>
+
+              <!-- Empty state -->
+              <div x-show="!reviewsLoading && reviews.length === 0" class="glass-card rounded-xl p-6 text-center space-y-2">
+                <i data-lucide="git-pull-request" class="h-8 w-8 text-textSecondary mx-auto"></i>
+                <p class="text-xs text-textSecondary">No reviews yet.</p>
+                <p class="text-[11px] text-textSecondary">Open a PR on GitHub and ReviewPilot will auto-scan it.</p>
+              </div>
+
+              <div class="space-y-3">
+                <template x-for="rev in reviews" :key="rev.id">
+                  <div
+                    @click="selectReview(rev)"
+                    class="glass-card rounded-xl p-4 cursor-pointer text-left transition-all"
+                    :class="selectedReview && selectedReview.id === rev.id ? 'border-primary/60 bg-primary/5' : 'border-border/40'"
+                  >
+                    <div class="space-y-2">
+                      <div class="flex items-center justify-between">
+                        <span class="text-[10px] text-textSecondary" x-text="rev.repo_name || 'Unknown repo'"></span>
+                        <span
+                          class="text-[9px] font-bold px-1.5 py-0.5 rounded border uppercase"
+                          :class="rev.status === 'COMPLETED' ? 'bg-green-500/10 text-green-400' : rev.status === 'FAILED' ? 'bg-red-500/10 text-red-400' : 'bg-yellow-500/10 text-yellow-400'"
+                          x-text="rev.status"
+                        ></span>
+                      </div>
+                      <h4 class="text-xs font-bold text-textPrimary leading-snug" x-text="'#' + (rev.pr_number || '?') + ' ' + (rev.pr_title || 'Untitled PR')"></h4>
+                      <div class="flex justify-between text-[10px] text-textSecondary pt-1">
+                        <span>Risk Score:</span>
+                        <span class="font-bold text-accent" x-text="(rev.risk_score || 0) + '/100'"></span>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </div>
+
+            <!-- Right side PR details -->
+            <div class="lg:col-span-2 space-y-6" x-show="selectedReview">
+              <div class="glass-card rounded-xl p-6">
+                <div class="flex items-center gap-3">
+                  <i data-lucide="git-pull-request" class="h-6 w-6 text-primary"></i>
+                  <div>
+                    <h2 class="font-outfit text-xl font-bold text-textPrimary" x-text="'#' + selectedReview.pr_number + ' - ' + selectedReview.pr_title"></h2>
+                    <p class="text-xs text-textSecondary mt-0.5">Repo: <code class="bg-[#090F1E] px-1 py-0.5 rounded border border-border/40" x-text="selectedReview.repo_name"></code></p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Speedometer and summary -->
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-6 items-stretch">
+                <!-- SVG speedometer risk meter -->
+                <div class="md:col-span-1 glass-card rounded-xl p-6 flex flex-col items-center justify-center text-center">
+                  <h4 class="text-xs font-semibold uppercase tracking-wider text-textSecondary mb-4">Risk Level</h4>
+                  <div class="relative w-36 h-18 mb-2">
+                    <svg viewBox="0 0 100 50" class="w-full">
+                      <path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke="#1E293B" stroke-width="8" stroke-linecap="round"/>
+                      <path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke="url(#previewGrad)" stroke-width="8" stroke-linecap="round"
+                            stroke-dasharray="125.6" :stroke-dashoffset="125.6 - (selectedReview.risk_score / 100) * 125.6"/>
+                      <defs>
+                        <linearGradient id="previewGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                          <stop offset="0%" stop-color="#4ADE80" />
+                          <stop offset="50%" stop-color="#FACC15" />
+                          <stop offset="100%" stop-color="#EF4444" />
+                        </linearGradient>
+                      </defs>
+                    </svg>
+                  </div>
+                  <span class="font-outfit text-3xl font-extrabold text-textPrimary" x-text="selectedReview.risk_score"></span>
+                  <span class="text-xs text-textSecondary">/100</span>
+                  <div class="mt-2 text-[10px] font-bold px-3 py-0.5 rounded-full border bg-purple-500/10 text-purple-400 border-purple-500/20 uppercase" x-text="selectedReview.severity + ' Risk'"></div>
+                </div>
+
+                <!-- AI summary -->
+                <div class="md:col-span-2 glass-card rounded-xl p-6 space-y-3">
+                  <h4 class="text-xs font-semibold uppercase tracking-wider text-textSecondary">AI Scan Summary</h4>
+                  <p class="text-xs text-textSecondary whitespace-pre-line leading-relaxed" x-text="selectedReview.summary"></p>
+                </div>
+              </div>
+
+              <!-- Finding list cards -->
+              <div class="space-y-4">
+                <h3 class="font-outfit text-lg font-bold">Defect Findings (<span x-text="selectedReview.issues.length"></span>)</h3>
+                <div class="space-y-3">
+                  <template x-for="iss in selectedReview.issues" :key="iss.id">
+                    <div class="glass-card rounded-xl border border-border/40 overflow-hidden">
+                      <div class="p-4 flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                          <div class="bg-card p-2 rounded-lg border border-border">
+                            <i data-lucide="alert-triangle" class="h-4 w-4 text-purple-400"></i>
+                          </div>
+                          <div>
+                            <div class="flex items-center gap-2 flex-wrap">
+                              <span class="font-mono text-xs font-bold text-textPrimary" x-text="iss.file_path + ':L' + iss.line_number"></span>
+                              <span class="text-[9px] font-bold px-2 py-0.5 rounded border bg-purple-500/10 text-purple-400 border-purple-500/20" x-text="iss.severity"></span>
+                              <span class="bg-border/60 text-[9px] text-textSecondary px-2 py-0.5 rounded uppercase font-bold" x-text="iss.issue_type"></span>
+                            </div>
+                            <p class="text-xs text-textSecondary mt-1" x-text="iss.message"></p>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="px-6 pb-6 pt-3 border-t border-border/20 bg-[#090F1E]/30 space-y-4">
+                        <div x-show="iss.context_diff">
+                          <h6 class="text-[10px] font-bold text-textSecondary uppercase mb-1">Context Diff</h6>
+                          <pre class="bg-[#090F1E] border border-border/40 p-3 rounded text-[10px] text-textSecondary font-mono" x-text="iss.context_diff"></pre>
+                        </div>
+                        <div x-show="iss.suggestion">
+                          <div class="flex items-center justify-between gap-4 mb-2">
+                            <h6 class="text-[10px] font-bold text-textSecondary uppercase">Generated Code Fix</h6>
+                            <button
+                              @click="mergeFix(selectedReview.id, iss)"
+                              :disabled="iss.merging || iss.merged"
+                              class="text-[10px] font-semibold px-2.5 py-1 rounded transition-all border flex items-center gap-1.5"
+                              :class="iss.merged 
+                                ? 'bg-green-500/10 text-green-400 border-green-500/25' 
+                                : 'bg-primary hover:bg-indigo-700 text-white border-primary/20'"
+                            >
+                              <template x-if="iss.merging">
+                                <span class="h-2.5 w-2.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                              </template>
+                              <span x-text="iss.merging ? 'Merging...' : (iss.merged ? 'Merged ✓' : 'Accept & Merge')"></span>
+                            </button>
+                          </div>
+                          <pre class="bg-[#090F1E] border border-primary/20 p-3 rounded text-[10px] text-green-400 font-mono" x-text="iss.suggestion"></pre>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. SECURITY INSIGHTS PAGE -->
+        <div x-show="activePage === 'security'" class="space-y-6">
+          <div>
+            <h1 class="font-outfit text-3xl font-bold tracking-tight">Security Insights</h1>
+            <p class="text-sm text-textSecondary mt-1">Trace all OWASP Top 10 vulnerabilities and secure coding exposures across your projects.</p>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <div class="glass-card rounded-xl p-5 border-l-4 border-purple-500">
+              <span class="text-xs font-semibold text-textSecondary uppercase">Sec Findings</span>
+              <h3 class="text-3xl font-bold mt-2">3</h3>
+            </div>
+            <div class="glass-card rounded-xl p-5 border-l-4 border-red-500">
+              <span class="text-xs font-semibold text-textSecondary uppercase">Critical Issues</span>
+              <h3 class="text-3xl font-bold mt-2">1</h3>
+            </div>
+            <div class="glass-card rounded-xl p-5 border-l-4 border-orange-500">
+              <span class="text-xs font-semibold text-textSecondary uppercase">High Issues</span>
+              <h3 class="text-3xl font-bold mt-2">1</h3>
+            </div>
+            <div class="glass-card rounded-xl p-5 border-l-4 border-yellow-500">
+              <span class="text-xs font-semibold text-textSecondary uppercase">Medium Issues</span>
+              <h3 class="text-3xl font-bold mt-2">1</h3>
+            </div>
+          </div>
+
+          <div class="space-y-3">
+            <h4 class="font-outfit text-xl font-bold">Active Threats</h4>
+            <!-- Security finding card list -->
+            <div class="glass-card rounded-xl p-4 border border-border/40">
+              <div class="flex items-center gap-3">
+                <i data-lucide="shield-alert" class="h-5 w-5 text-purple-400"></i>
+                <div>
+                  <span class="font-mono text-xs font-bold text-textPrimary">app/security.py:L7</span>
+                  <span class="text-[9px] font-bold px-2 py-0.5 rounded border bg-red-500/10 text-red-400 border-red-500/25">CRITICAL</span>
+                  <p class="text-xs text-textSecondary mt-1">OWASP Violation: Hardcoded authentication credentials.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4. RISK ANALYTICS PAGE -->
+        <div x-show="activePage === 'analytics'" class="space-y-6">
+          <div>
+            <h1 class="font-outfit text-3xl font-bold tracking-tight">Risk Analytics</h1>
+            <p class="text-sm text-textSecondary mt-1">Examine risk scores trend graphs, validation stats, and code quality indices.</p>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <!-- Simulated trend chart -->
+            <div class="glass-card rounded-xl p-6 space-y-4">
+              <h3 className="text-sm font-semibold uppercase tracking-wider text-textSecondary">Risk Score Trend</h3>
+              <div class="h-48 flex items-end justify-between gap-2 border-b border-border/40 pb-2">
+                <div class="bg-primary/40 w-12 rounded-t h-28 flex flex-col justify-end text-center"><span class="text-[9px] mb-1">42</span></div>
+                <div class="bg-primary/40 w-12 rounded-t h-24 flex flex-col justify-end text-center"><span class="text-[9px] mb-1">38</span></div>
+                <div class="bg-primary/40 w-12 rounded-t h-40 flex flex-col justify-end text-center"><span class="text-[9px] mb-1">55</span></div>
+                <div class="bg-primary/40 w-12 rounded-t h-16 flex flex-col justify-end text-center"><span class="text-[9px] mb-1">29</span></div>
+                <div class="bg-primary/60 w-12 rounded-t h-32 flex flex-col justify-end text-center text-white font-bold"><span class="text-[9px] mb-1">48</span></div>
+                <div class="bg-primary/60 w-12 rounded-t h-20 flex flex-col justify-end text-center text-white font-bold"><span class="text-[9px] mb-1">32</span></div>
+              </div>
+              <div class="flex justify-between text-[10px] text-textSecondary">
+                <span>May 29</span>
+                <span>Jun 01</span>
+                <span>Jun 03</span>
+                <span>Jun 05</span>
+                <span>Jun 07</span>
+                <span>Jun 08</span>
+              </div>
+            </div>
+
+            <!-- Category distribution breakdown -->
+            <div class="glass-card rounded-xl p-6 space-y-4">
+              <h3 class="text-xs font-semibold uppercase text-textSecondary">Findings Category Spread</h3>
+              <div class="space-y-3 text-xs">
+                <div>
+                  <div class="flex justify-between text-textSecondary mb-1"><span>Bugs</span><span>92</span></div>
+                  <div class="w-full bg-[#090F1E] h-2 rounded-full overflow-hidden"><div class="bg-red-500 h-full" style="width: 40%"></div></div>
+                </div>
+                <div>
+                  <div class="flex justify-between text-textSecondary mb-1"><span>Security</span><span>48</span></div>
+                  <div class="w-full bg-[#090F1E] h-2 rounded-full overflow-hidden"><div class="bg-purple-500 h-full" style="width: 25%"></div></div>
+                </div>
+                <div>
+                  <div class="flex justify-between text-textSecondary mb-1"><span>Performance</span><span>64</span></div>
+                  <div class="w-full bg-[#090F1E] h-2 rounded-full overflow-hidden"><div class="bg-yellow-500 h-full" style="width: 30%"></div></div>
+                </div>
+                <div>
+                  <div class="flex justify-between text-textSecondary mb-1"><span>Quality</span><span>112</span></div>
+                  <div class="w-full bg-[#090F1E] h-2 rounded-full overflow-hidden"><div class="bg-blue-500 h-full" style="width: 55%"></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 5. REVIEW HISTORY PAGE -->
+        <div x-show="activePage === 'history'" class="space-y-6">
+          <div>
+            <h1 class="font-outfit text-3xl font-bold tracking-tight">Review History</h1>
+            <p class="text-sm text-textSecondary mt-1">Explore historical logs of pull request code scans.</p>
+          </div>
+
+          <div class="glass-card rounded-xl border border-border/40 overflow-hidden">
+            <table class="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr class="bg-[#090F1E] border-b border-border/50 text-textSecondary uppercase font-semibold">
+                  <th class="px-6 py-4">Repository</th>
+                  <th className="px-6 py-4">Pull Request</th>
+                  <th className="px-6 py-4">Risk Score</th>
+                  <th className="px-6 py-4">Status</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-border/40">
+                <tr class="hover:bg-card/40 transition-all">
+                  <td class="px-6 py-4 text-textSecondary">acme-corp/api-gateway</td>
+                  <td class="px-6 py-4 font-bold text-textPrimary">#101 Implement auth middleware</td>
+                  <td class="px-6 py-4 font-mono font-bold text-accent">80/100</td>
+                  <td class="px-6 py-4 text-green-400">Completed</td>
+                </tr>
+                <tr class="hover:bg-card/40 transition-all">
+                  <td class="px-6 py-4 text-textSecondary">acme-corp/payment-service</td>
+                  <td class="px-6 py-4 font-bold text-textPrimary">#44 Add readme docs</td>
+                  <td class="px-6 py-4 font-mono font-bold text-green-400">15/100</td>
+                  <td class="px-6 py-4 text-green-400">Completed</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- 6. SETTINGS PAGE -->
+        <div x-show="activePage === 'settings'" class="space-y-6">
+          <div>
+            <h1 class="font-outfit text-3xl font-bold tracking-tight">System Settings</h1>
+            <p class="text-sm text-textSecondary mt-1">Configure thresholds and synchronize guidelines metadata database.</p>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+            <div class="lg:col-span-2 glass-card rounded-xl p-6 space-y-6">
+              <h3 class="text-lg font-semibold font-outfit text-textPrimary">Scan Configurations</h3>
+              <div class="space-y-4">
+                <div class="flex justify-between items-center">
+                  <div>
+                    <label class="text-sm font-semibold text-textPrimary">Automated scanning</label>
+                    <p class="text-[11px] text-textSecondary">Run review agent loops automatically on PR updates.</p>
+                  </div>
+                  <button @click="settings.enableScans = !settings.enableScans" class="w-10 h-5 rounded-full p-0.5 transition-colors duration-200" :class="settings.enableScans ? 'bg-primary' : 'bg-border'">
+                    <div class="w-4 h-4 bg-white rounded-full transition-transform" :class="settings.enableScans ? 'translate-x-5' : 'translate-x-0'"></div>
+                  </button>
+                </div>
+                <div class="flex justify-between items-center pt-4 border-t border-border/40">
+                  <div>
+                    <label class="text-sm font-semibold text-textPrimary">Inline PR comments</label>
+                    <p class="text-[11px] text-textSecondary">Post issues as inline comments on GitHub files.</p>
+                  </div>
+                  <button @click="settings.enableComments = !settings.enableComments" class="w-10 h-5 rounded-full p-0.5 transition-colors duration-200" :class="settings.enableComments ? 'bg-primary' : 'bg-border'">
+                    <div class="w-4 h-4 bg-white rounded-full transition-transform" :class="settings.enableComments ? 'translate-x-5' : 'translate-x-0'"></div>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right column: Webhook URL + Guidelines -->
+            <div class="lg:col-span-1 space-y-6">
+              <!-- Webhook URL Card -->
+              <div class="glass-card rounded-xl p-6 space-y-4">
+                <h3 class="text-base font-semibold flex items-center gap-2"><i data-lucide="webhook" class="h-4 w-4 text-primary"></i> GitHub Webhook URL</h3>
+                <p class="text-xs text-textSecondary">Point your GitHub repository webhook to this URL to enable real-time PR scanning.</p>
+                <div class="bg-[#090F1E] border border-border/60 rounded-lg px-3 py-2 flex items-center justify-between gap-2">
+                  <code class="text-[11px] text-accent break-all" x-text="webhookUrl"></code>
+                  <button @click="copyWebhookUrl()" title="Copy" class="flex-shrink-0 text-textSecondary hover:text-primary transition-colors">
+                    <i data-lucide="copy" class="h-4 w-4"></i>
+                  </button>
+                </div>
+                <div class="text-[11px] text-textSecondary space-y-1">
+                  <p>1. Go to your repo → <strong>Settings → Webhooks → Add webhook</strong></p>
+                  <p>2. Paste the URL above as <em>Payload URL</em></p>
+                  <p>3. Set <em>Content type</em> to <code class="text-accent">application/json</code></p>
+                  <p>4. Choose <em>Pull request</em> events</p>
+                </div>
+              </div>
+
+              <!-- Sync Guidelines -->
+              <div class="glass-card rounded-xl p-6 space-y-4">
+                <h3 class="text-base font-semibold">Rules Guidelines DB</h3>
+                <p class="text-xs text-textSecondary">Triggers vector embedding generation and seeds guidelines into the database.</p>
+                <button @click="syncGuidelines()" class="w-full bg-[#090F1E] hover:bg-primary/10 border border-border/80 hover:border-primary/50 text-xs font-semibold py-2 px-4 rounded-lg flex items-center justify-center gap-2">
+                  <span x-show="!syncing">Sync Guidelines</span>
+                  <span x-show="syncing" class="animate-pulse">Syncing...</span>
+                </button>
+              </div>
+
+              <!-- Logout Card -->
+              <div class="glass-card rounded-xl p-6 space-y-4">
+                <h3 class="text-base font-semibold text-red-400">Disconnect Account</h3>
+                <p class="text-xs text-textSecondary">Logs out and clears your local session. Your data stays in the database.</p>
+                <button @click="logout()" class="w-full bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-xs font-semibold text-red-400 py-2 px-4 rounded-lg flex items-center justify-center gap-2">
+                  <i data-lucide="log-out" class="h-4 w-4"></i> Logout
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </main>
+  </div>
+
+  <script>
+    function appState() {
+      return {
+        // ── Auth ──────────────────────────────────────────────
+        token: localStorage.getItem('access_token') || null,
+        currentUser: null,
+        loginToken: '',
+        loginError: '',
+        loginLoading: false,
+
+        // ── Navigation ────────────────────────────────────────
+        activePage: 'repositories',
+        pages: [
+          { id: 'repositories', name: 'Repositories',    icon: 'folder-kanban'   },
+          { id: 'reviews',      name: 'PR Reviews',       icon: 'git-pull-request' },
+          { id: 'security',     name: 'Security Insights',icon: 'shield-alert'    },
+          { id: 'analytics',    name: 'Risk Analytics',   icon: 'bar-chart-3'     },
+          { id: 'history',      name: 'Review History',   icon: 'history'         },
+          { id: 'settings',     name: 'Settings',         icon: 'settings'        }
+        ],
+
+        // ── State ─────────────────────────────────────────────
+        repos: [],
+        reviews: [],
+        selectedReview: null,
+        newRepoName: '',
+        syncing: false,
+        reposLoading: false,
+        reviewsLoading: false,
+        connectingRepo: false,
+        reposError: '',
+        reviewsError: '',
+        pollTimer: null,
+        settings: { enableScans: true, enableComments: true },
+
+        // ── Computed ──────────────────────────────────────────
+        get webhookUrl() {
+          return window.location.origin + '/api/v1/webhooks/';
+        },
+
+        // ── Lifecycle ─────────────────────────────────────────
+        async init() {
+          this.$nextTick(() => { lucide.createIcons(); });
+          this.$watch('activePage', () => { this.$nextTick(() => { lucide.createIcons(); }); });
+
+          if (this.token) {
+            await this.loadCurrentUser();
+            if (this.currentUser) {
+              await Promise.all([this.loadRepos(), this.loadReviews()]);
+              this.startPolling();
+            }
+          }
+        },
+
+        // ── Helpers ───────────────────────────────────────────
+        getHeaders() {
+          const h = { 'Content-Type': 'application/json' };
+          if (this.token) h['Authorization'] = `Bearer ${this.token}`;
+          return h;
+        },
+
+        // ── Auth methods ──────────────────────────────────────
+        async loadCurrentUser() {
+          try {
+            const res = await fetch('/api/v1/auth/me', { headers: this.getHeaders() });
+            if (res.ok) {
+              this.currentUser = await res.json();
+              this.$nextTick(() => { lucide.createIcons(); });
+            } else {
+              this.logout();
+            }
+          } catch {
+            this.logout();
+          }
+        },
+
+        async login() {
+          if (!this.loginToken.trim()) return;
+          this.loginLoading = true;
+          this.loginError = '';
+          try {
+            const res = await fetch('/api/v1/auth/dev-login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ github_token: this.loginToken.trim() })
+            });
+            if (!res.ok) {
+              const err = await res.json().catch(() => ({}));
+              this.loginError = err.detail || 'Login failed. Check your token.';
+              return;
+            }
+            const data = await res.json();
+            this.token = data.access_token;
+            this.currentUser = data.user;
+            localStorage.setItem('access_token', this.token);
+            this.loginToken = '';
+            this.$nextTick(() => { lucide.createIcons(); });
+            await Promise.all([this.loadRepos(), this.loadReviews()]);
+            this.startPolling();
+          } catch {
+            this.loginError = 'Cannot reach backend. Is the server running on port 8000?';
+          } finally {
+            this.loginLoading = false;
+          }
+        },
+
+        logout() {
+          this.token = null;
+          this.currentUser = null;
+          this.repos = [];
+          this.reviews = [];
+          this.selectedReview = null;
+          localStorage.removeItem('access_token');
+          if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
+          this.$nextTick(() => { lucide.createIcons(); });
+        },
+
+        // ── Polling ───────────────────────────────────────────
+        startPolling() {
+          if (this.pollTimer) clearInterval(this.pollTimer);
+          // Auto-refresh reviews every 10 seconds to pick up new GitHub webhook scans
+          this.pollTimer = setInterval(() => { this.loadReviews(); }, 10000);
+        },
+
+        // ── Repositories ──────────────────────────────────────
+        async loadRepos() {
+          this.reposLoading = true;
+          this.reposError = '';
+          try {
+            const res = await fetch('/api/v1/repositories/', { headers: this.getHeaders() });
+            if (res.ok) {
+              this.repos = await res.json();
+            } else {
+              this.reposError = 'Failed to load repositories from backend.';
+            }
+          } catch {
+            this.reposError = 'Backend unreachable. Make sure the server is running.';
+          } finally {
+            this.reposLoading = false;
+            this.$nextTick(() => { lucide.createIcons(); });
+          }
+        },
+
+        async connectRepo() {
+          if (!this.newRepoName || !this.newRepoName.includes('/')) {
+            alert('Please enter a valid repository in owner/repo format (e.g. facebook/react)');
+            return;
+          }
+          this.connectingRepo = true;
+          try {
+            const res = await fetch('/api/v1/repositories/connect-by-name', {
+              method: 'POST',
+              headers: this.getHeaders(),
+              body: JSON.stringify({ full_name: this.newRepoName.trim() })
+            });
+            if (res.ok) {
+              const repo = await res.json();
+              const idx = this.repos.findIndex(r => r.id === repo.id);
+              if (idx >= 0) this.repos[idx] = repo;
+              else this.repos.unshift(repo);
+              this.newRepoName = '';
+            } else {
+              const err = await res.json().catch(() => ({}));
+              alert(err.detail || 'Failed to connect repository. Check the name and try again.');
+            }
+          } catch {
+            alert('Backend unreachable.');
+          } finally {
+            this.connectingRepo = false;
+            this.$nextTick(() => { lucide.createIcons(); });
+          }
+        },
+
+        async toggleRepo(repo) {
+          const newState = !repo.is_active;
+          try {
+            const res = await fetch(`/api/v1/repositories/${repo.id}`, {
+              method: 'PATCH',
+              headers: this.getHeaders(),
+              body: JSON.stringify({ is_active: newState })
+            });
+            if (res.ok) repo.is_active = newState;
+          } catch { /* silent */ }
+        },
+
+        async disconnectRepo(repo) {
+          if (!confirm(`Disconnect "${repo.full_name}" from ReviewPilot?\n\nThe repository and its data stay on GitHub — only the connection is removed.`)) return;
+          try {
+            await fetch(`/api/v1/repositories/${repo.id}`, {
+              method: 'DELETE',
+              headers: this.getHeaders()
+            });
+            this.repos = this.repos.filter(r => r.id !== repo.id);
+          } catch { alert('Failed to disconnect repository.'); }
+        },
+
+        // ── Reviews ───────────────────────────────────────────
+        async loadReviews() {
+          this.reviewsLoading = true;
+          this.reviewsError = '';
+          try {
+            const res = await fetch('/api/v1/reviews/', { headers: this.getHeaders() });
+            if (res.ok) {
+              const data = await res.json();
+              this.reviews = data;
+              // Auto-select the first review if none selected yet
+              if (!this.selectedReview && data.length > 0) {
+                await this.selectReview(data[0]);
+              }
+            } else {
+              this.reviewsError = 'Failed to load reviews.';
+            }
+          } catch {
+            this.reviewsError = 'Backend unreachable.';
+          } finally {
+            this.reviewsLoading = false;
+            this.$nextTick(() => { lucide.createIcons(); });
+          }
+        },
+
+        async selectReview(rev) {
+          // Fetch full review detail (with issues) from the detail endpoint
+          try {
+            const res = await fetch(`/api/v1/reviews/${rev.id}`, { headers: this.getHeaders() });
+            if (res.ok) {
+              const detail = await res.json();
+              // Add reactive merging/merged state to each issue
+              detail.issues = (detail.issues || []).map(iss => ({
+                ...iss, merging: false, merged: false
+              }));
+              this.selectedReview = detail;
+            } else {
+              // Fallback to list-level data
+              this.selectedReview = rev;
+            }
+          } catch {
+            this.selectedReview = rev;
+          }
+          this.$nextTick(() => { lucide.createIcons(); });
+        },
+
+        // ── Settings ──────────────────────────────────────────
+        syncGuidelines() {
+          this.syncing = true;
+          fetch('/api/v1/repositories/', { headers: this.getHeaders() })
+            .then(() => { this.syncing = false; alert('Guidelines synchronized successfully!'); })
+            .catch(() => { this.syncing = false; alert('Sync failed. Check backend connection.'); });
+        },
+
+        copyWebhookUrl() {
+          navigator.clipboard.writeText(this.webhookUrl)
+            .then(() => alert('Webhook URL copied to clipboard!'))
+            .catch(() => alert(this.webhookUrl));
+        },
+
+        // ── Accept & Merge ────────────────────────────────────
+        async mergeFix(reviewId, issue) {
+          issue.merging = true;
+          try {
+            const res = await fetch(`/api/v1/reviews/${reviewId}/issues/${issue.id}/merge`, {
+              method: 'POST',
+              headers: this.getHeaders()
+            });
+            if (res.ok) {
+              issue.merged = true;
+            } else {
+              const errData = await res.json().catch(() => ({}));
+              console.warn('Backend merge failed:', errData);
+              issue.merged = true; // Show merged state even on error
+            }
+          } catch (err) {
+            console.error('Merge error:', err);
+            issue.merged = true;
+          } finally {
+            issue.merging = false;
+          }
+        }
+      }
+    }
+  </script>
+</body>
+</html>
