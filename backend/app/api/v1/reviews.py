@@ -147,10 +147,10 @@ async def merge_issue_fix(
             detail="Review issue not found or access denied."
         )
         
-    if not issue.suggestion or not issue.context_diff:
+    if not issue.suggestion:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Issue does not contain a valid code suggestion/diff context to apply."
+            detail="Issue does not contain a fix suggestion to apply."
         )
 
     review = issue.review
@@ -159,7 +159,7 @@ async def merge_issue_fix(
 
     # 2. Get decrypted OAuth token
     token = decrypt_token(current_user.encrypted_access_token)
-    
+
     # 3. Only skip GitHub call if the token itself is a placeholder (no real GitHub access)
     from app.core.config import settings
     if token.startswith("gho_mock") or token == "mock_token" or token.startswith("mock_"):
@@ -168,6 +168,65 @@ async def merge_issue_fix(
     parts = repo.full_name.split("/")
     owner_name = parts[0]
     repo_name = parts[1]
+
+    # 4. TEST issues → create a new test file instead of patching an existing one
+    if issue.issue_type.value == "TEST":
+        # Derive a test file path from the source file
+        src = issue.file_path
+        base = src.rsplit(".", 1)[0]   # e.g. "dummyy"
+        ext  = src.rsplit(".", 1)[-1] if "." in src else "py"
+        test_path = f"tests/test_{base.replace('/', '_')}.{ext}"
+
+        # Check if the test file already exists
+        import httpx as _httpx
+        auth_header = f"token {token}"
+        async with _httpx.AsyncClient() as client:
+            check = await client.get(
+                f"https://api.github.com/repos/{owner_name}/{repo_name}/contents/{test_path}",
+                headers={"Authorization": auth_header, "Accept": "application/vnd.github.v3+json"},
+                params={"ref": pr.source_branch},
+                timeout=10.0,
+            )
+
+        import base64 as _b64
+        encoded = _b64.b64encode(issue.suggestion.encode("utf-8")).decode("utf-8")
+        commit_msg = f"[ReviewPilot] Add AI-generated test file for {src}"
+
+        async with _httpx.AsyncClient() as client:
+            if check.status_code == 200:
+                # File exists — update it
+                existing_sha = check.json()["sha"]
+                put = await client.put(
+                    f"https://api.github.com/repos/{owner_name}/{repo_name}/contents/{test_path}",
+                    headers={"Authorization": auth_header, "Accept": "application/vnd.github.v3+json"},
+                    json={"message": commit_msg, "content": encoded, "sha": existing_sha, "branch": pr.source_branch},
+                    timeout=15.0,
+                )
+            else:
+                # File does not exist — create it
+                put = await client.put(
+                    f"https://api.github.com/repos/{owner_name}/{repo_name}/contents/{test_path}",
+                    headers={"Authorization": auth_header, "Accept": "application/vnd.github.v3+json"},
+                    json={"message": commit_msg, "content": encoded, "branch": pr.source_branch},
+                    timeout=15.0,
+                )
+
+        if put.status_code not in (200, 201):
+            err = put.json().get("message", put.text[:200])
+            if "403" in str(put.status_code) or "not accessible" in err:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="GitHub write permission denied. Your PAT needs 'Contents: Read and Write' permission.",
+                )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to create test file on GitHub: {err}",
+            )
+
+        return {
+            "status": "success",
+            "message": f"✅ Test file created successfully at `{test_path}` on branch `{pr.source_branch}`.",
+        }
 
     # 4. Retrieve the current file from GitHub (to get its content and SHA)
     try:
