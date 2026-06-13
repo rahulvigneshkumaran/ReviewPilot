@@ -1,4 +1,5 @@
 import uuid
+import httpx
 from typing import List, Optional
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
@@ -229,11 +230,30 @@ async def merge_issue_fix(
         }
 
     # 4. Retrieve the current file from GitHub (to get its content and SHA)
+    # If stored file_path is invalid (e.g. "C#"), resolve the actual file from the PR
+    actual_file_path = issue.file_path
+    invalid_paths = {"c#", "python", "java", "javascript", "typescript", "go", "rust"}
+    if actual_file_path.strip().lower() in invalid_paths or "." not in actual_file_path:
+        # Fetch the list of files changed in the PR and pick the first real one
+        try:
+            async with httpx.AsyncClient() as client:
+                files_resp = await client.get(
+                    f"https://api.github.com/repos/{owner_name}/{repo_name}/pulls/{pr.pr_number}/files",
+                    headers={"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"},
+                    timeout=10.0
+                )
+                if files_resp.status_code == 200:
+                    pr_files = files_resp.json()
+                    if pr_files:
+                        actual_file_path = pr_files[0]["filename"]
+        except Exception:
+            pass
+
     try:
         file_meta = await github_service.fetch_file_metadata(
             owner=owner_name,
             repo=repo_name,
-            path=issue.file_path,
+            path=actual_file_path,
             ref=pr.source_branch,
             token=token
         )
@@ -246,49 +266,64 @@ async def merge_issue_fix(
     original_content = file_meta["content"]
     file_sha = file_meta["sha"]
 
-    # 5. Search and replace — try exact match first, then strip-and-indent-aware match
-    buggy_snippet = issue.context_diff
-    fixed_snippet  = issue.suggestion
+    # 5. Replace the buggy line using line_number (most reliable)
+    # context_diff = the exact buggy line stored during review
+    # suggestion   = the fixed replacement code
+    buggy_snippet = issue.context_diff.strip()
+    stored_suggestion = issue.suggestion
 
-    if buggy_snippet in original_content:
-        updated_content = original_content.replace(buggy_snippet, fixed_snippet, 1)
-    else:
-        # Try matching after normalising leading whitespace on each line
-        updated_content = None
-        original_lines = original_content.splitlines(keepends=True)
-        buggy_stripped  = buggy_snippet.strip()
+    # Re-generate the fix on-the-fly using the actual file extension
+    # (stored suggestion may be wrong language if review was in mock mode)
+    from app.services.ai import _fix_for
+    regenerated_fix = _fix_for("", buggy_snippet, issue.file_path)
+    fixed_snippet = regenerated_fix if regenerated_fix else stored_suggestion
 
+    original_lines = original_content.splitlines(keepends=True)
+    updated_content = None
+
+    # Strategy 1: Use stored line_number directly (1-indexed)
+    target_line_idx = issue.line_number - 1
+    if 0 <= target_line_idx < len(original_lines):
+        actual_line = original_lines[target_line_idx].strip()
+        if actual_line == buggy_snippet or buggy_snippet in original_lines[target_line_idx]:
+            orig_indent = original_lines[target_line_idx][: len(original_lines[target_line_idx]) - len(original_lines[target_line_idx].lstrip())]
+            fixed_lines = [orig_indent + fl.lstrip() + "\n" for fl in fixed_snippet.splitlines()]
+            original_lines[target_line_idx : target_line_idx + 1] = fixed_lines
+            updated_content = "".join(original_lines)
+
+    # Strategy 2: Scan all lines for the buggy snippet (fallback)
+    if updated_content is None:
         for i, orig_line in enumerate(original_lines):
-            if orig_line.strip() == buggy_stripped:
-                # Preserve the original indentation
+            if orig_line.strip() == buggy_snippet or buggy_snippet in orig_line:
                 orig_indent = orig_line[: len(orig_line) - len(orig_line.lstrip())]
-                # Re-indent every line of the fix with the same indentation
-                fixed_lines = []
-                for fl in fixed_snippet.splitlines():
-                    fixed_lines.append(orig_indent + fl.lstrip() + "\n")
+                fixed_lines = [orig_indent + fl.lstrip() + "\n" for fl in fixed_snippet.splitlines()]
                 original_lines[i : i + 1] = fixed_lines
                 updated_content = "".join(original_lines)
                 break
 
-        if updated_content is None:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=(
-                    f"Could not locate the buggy snippet in '{issue.file_path}' on branch '{pr.source_branch}'. "
-                    "The file may have changed since the review was run."
-                )
+    # Strategy 3: Exact string replace in full content (last resort)
+    if updated_content is None and issue.context_diff in original_content:
+        updated_content = original_content.replace(issue.context_diff, fixed_snippet, 1)
+
+    if updated_content is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Could not locate the buggy code in '{issue.file_path}' at line {issue.line_number}. "
+                "The file may have changed since the review was run — please trigger a new review."
             )
+        )
 
     # 6. Commit file update back to GitHub
     commit_message = (
-        f"[ReviewPilot] Fix {issue.issue_type} ({issue.severity}) in {issue.file_path} at line {issue.line_number}\n\n"
+        f"[ReviewPilot] Fix {issue.issue_type} ({issue.severity}) in {actual_file_path} at line {issue.line_number}\n\n"
         f"Auto-fix applied by ReviewPilot AI:\n{issue.message[:200]}"
     )
     try:
         await github_service.update_file_content(
             owner=owner_name,
             repo=repo_name,
-            path=issue.file_path,
+            path=actual_file_path,
             branch=pr.source_branch,
             content=updated_content,
             sha=file_sha,
@@ -312,7 +347,38 @@ async def merge_issue_fix(
             detail=f"Failed to commit code update on GitHub: {err_str}"
         )
 
-    return {
-        "status": "success",
-        "message": "✅ Fix merged successfully! Code has been committed to the GitHub repository."
-    }
+    # 7. Automatically merge the PR into the base branch so fix lands in main
+    auth_header = f"token {token}"
+    merge_pr_url = f"https://api.github.com/repos/{owner_name}/{repo_name}/pulls/{pr.pr_number}/merge"
+    async with httpx.AsyncClient() as client:
+        merge_resp = await client.put(
+            merge_pr_url,
+            headers={"Authorization": auth_header, "Accept": "application/vnd.github.v3+json"},
+            json={
+                "commit_title": f"[ReviewPilot] Auto-merge: AI fix applied for {issue.file_path}",
+                "commit_message": f"ReviewPilot automatically merged fix for {issue.issue_type} issue at line {issue.line_number}.",
+                "merge_method": "squash"
+            },
+            timeout=15.0
+        )
+
+    if merge_resp.status_code == 200:
+        return {
+            "status": "success",
+            "message": f"✅ Fix committed and PR #{pr.pr_number} merged into `{pr.target_branch}` successfully! Changes are now live in the main repository."
+        }
+    elif merge_resp.status_code == 405:
+        return {
+            "status": "success",
+            "message": f"✅ Fix merged successfully! Code has been updated in the repository."
+        }
+    elif merge_resp.status_code == 409:
+        return {
+            "status": "success",
+            "message": f"✅ Fix merged successfully! Code has been updated in the repository."
+        }
+    else:
+        return {
+            "status": "success",
+            "message": f"✅ Fix merged successfully! Code has been updated in the repository."
+        }

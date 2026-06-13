@@ -20,15 +20,23 @@ from app.db.models import User, Review, ReviewIssue, ReviewComment, ReviewStatus
 # --- 1. Token Optimization Diff Parsers ---
 
 def should_analyze_file(file_path: str) -> bool:
-    """Ignore binaries, generated, lock files, and minified scripts to optimize token budget."""
+    """Ignore binaries, generated, lock files, minified scripts, and invalid paths."""
+    # Reject paths that are clearly not real file paths
+    # e.g. language names like "C#", "Python", single chars, or paths with no extension-like content
+    if not file_path or len(file_path.strip()) <= 2:
+        return False
+    # Reject if path looks like a language name (no slash, no dot, short word)
+    if "/" not in file_path and "." not in file_path and len(file_path) < 20:
+        return False
+    # Reject known non-file strings
+    invalid_names = {"c#", "python", "java", "javascript", "typescript", "go", "rust", "ruby", "php", "swift", "kotlin"}
+    if file_path.strip().lower() in invalid_names:
+        return False
+
     exclude_patterns = [
-        # Lock files
         "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "poetry.lock", "go.sum", "Cargo.lock",
-        # Binaries/Images
         ".png", ".jpg", ".jpeg", ".gif", ".ico", ".pdf", ".zip", ".tar.gz", ".tar",
-        # Generated files / Caches
         "node_modules/", ".next/", "dist/", "build/", ".pyc", ".git/", "venv/", ".venv/",
-        # Minified files
         ".min.js", ".min.css"
     ]
     for pattern in exclude_patterns:
@@ -134,7 +142,9 @@ def _build_added_lines_index(diff_text: str) -> List[tuple]:
     current_line = 0
     for line in diff_text.splitlines():
         if line.startswith("+++ b/"):
-            current_file = line[6:]
+            candidate = line[6:].strip()
+            # Only accept valid file paths — reject language names like "C#"
+            current_file = candidate if should_analyze_file(candidate) else None
             current_line = 0
         elif line.startswith("--- a/"):
             continue
@@ -151,58 +161,77 @@ def _build_added_lines_index(diff_text: str) -> List[tuple]:
     return result
 
 def _fix_for(pattern: str, buggy_line: str, file_path: str) -> Optional[str]:
-    """Generate a language-aware fixed code snippet for a known bug pattern."""
+    """
+    Generate a language-aware fixed code snippet for a known bug pattern.
+    Returns the FULL replacement (may be multi-line) — used for display in UI.
+    The merge endpoint uses line_number + this to replace the buggy line in the file.
+    """
     ext = file_path.rsplit(".", 1)[-1].lower() if "." in file_path else ""
     stripped = buggy_line.strip()
     indent = " " * (len(buggy_line) - len(buggy_line.lstrip()))
 
-    # Security fixes
-    if re.search(r'password\s*=\s*["\']', pattern) or re.search(r'password\s*=\s*["\']', stripped.lower()):
+    # ── Security: replace hardcoded values with env var reads ──────────
+    if re.search(r'password\s*=\s*["\'][^"\']+["\']', stripped.lower()):
         if ext == "cs":
-            return f'{indent}string password = Environment.GetEnvironmentVariable("DB_PASSWORD");\nif (string.IsNullOrEmpty(password)) throw new InvalidOperationException("Missing DB_PASSWORD env variable");'
-        return f'{indent}password = os.getenv("DB_PASSWORD")\nif not password:\n{indent}    raise EnvironmentError("Missing DB_PASSWORD environment variable")'
-    if re.search(r'api_key\s*=\s*["\']', stripped.lower()):
-        return f'{indent}api_key = os.getenv("API_KEY")\nif not api_key:\n{indent}    raise EnvironmentError("Missing API_KEY environment variable")'
-    if re.search(r'secret\s*=\s*["\']', stripped.lower()):
-        return f'{indent}secret = os.getenv("SECRET_KEY")\nif not secret:\n{indent}    raise EnvironmentError("Missing SECRET_KEY environment variable")'
-    if re.search(r'token\s*=\s*["\']', stripped.lower()):
-        return f'{indent}token = os.getenv("ACCESS_TOKEN")\nif not token:\n{indent}    raise EnvironmentError("Missing ACCESS_TOKEN environment variable")'
+            return f'{indent}string password = Environment.GetEnvironmentVariable("DB_PASSWORD"); // Fixed: use env var'
+        return f'{indent}password = os.getenv("DB_PASSWORD")  # Fixed: use environment variable'
 
-    # C# fixes
+    if re.search(r'api_key\s*=\s*["\'][^"\']+["\']', stripped.lower()):
+        if ext == "cs":
+            return f'{indent}string apiKey = Environment.GetEnvironmentVariable("API_KEY"); // Fixed: use env var'
+        return f'{indent}api_key = os.getenv("API_KEY")  # Fixed: use environment variable'
+
+    if re.search(r'secret\s*=\s*["\'][^"\']+["\']', stripped.lower()):
+        if ext == "cs":
+            return f'{indent}string secret = Environment.GetEnvironmentVariable("SECRET_KEY"); // Fixed: use env var'
+        return f'{indent}secret = os.getenv("SECRET_KEY")  # Fixed: use environment variable'
+
+    if re.search(r'token\s*=\s*["\'][^"\']+["\']', stripped.lower()):
+        if ext == "cs":
+            return f'{indent}string token = Environment.GetEnvironmentVariable("ACCESS_TOKEN"); // Fixed: use env var'
+        return f'{indent}token = os.getenv("ACCESS_TOKEN")  # Fixed: use environment variable'
+
+    # ── C# fixes ────────────────────────────────────────────────────────
     if ext == "cs":
+        # Off-by-one: i <= x → i < x
         if re.search(r'i\s*<=\s*\w+\s*;\s*i\+\+', stripped.lower()):
             fixed = re.sub(r'<=', '<', stripped)
-            return f'{indent}{fixed}  // Fixed: changed <= to < to prevent off-by-one error'
+            return f'{indent}{fixed}  // Fixed: <= changed to < (off-by-one)'
+
+        # int.Parse → int.TryParse (replace the whole statement)
         if re.search(r'convert\.toint32|int\.parse\b', stripped.lower()):
-            # Extract the variable name being assigned to, if any
-            m = re.match(r'\s*(\w+)\s*\w+\s*=\s*(?:Convert\.ToInt32|int\.Parse)\s*\((.*)\)', stripped, re.IGNORECASE)
+            m = re.match(r'\s*(?:int\s+)?(\w+)\s*=\s*(?:Convert\.ToInt32|int\.Parse)\s*\((.+)\)\s*;', stripped, re.IGNORECASE)
             if m:
-                varname, arg = m.group(1), m.group(2)
-                return (f'{indent}if (!int.TryParse({arg}, out int {varname}))\n'
-                        f'{indent}{{\n'
-                        f'{indent}    Console.WriteLine("Invalid input — please enter a valid integer.");\n'
-                        f'{indent}    return;\n'
-                        f'{indent}}}')
-            return f'{indent}// Use int.TryParse instead:\n{indent}if (!int.TryParse(input, out int result))\n{indent}{{\n{indent}    Console.WriteLine("Invalid number");\n{indent}    return;\n{indent}}}'
+                varname, arg = m.group(1), m.group(2).strip()
+                return (
+                    f'{indent}if (!int.TryParse({arg}, out int {varname}))\n'
+                    f'{indent}    {{ Console.WriteLine("Invalid input."); return; }}'
+                )
+            return f'{indent}// TODO: Replace int.Parse with int.TryParse to handle invalid input safely'
+
+        # Console.ReadLine null-check
         if re.search(r'console\.readline\(\)', stripped.lower()):
-            return (f'{indent}string? input = Console.ReadLine();\n'
-                    f'{indent}if (input == null) {{ Console.WriteLine("No input provided."); return; }}')
-        if re.search(r'\w+\s*/\s*\w+', stripped) and ext == "cs":
-            # Extract denominator
+            replaced = re.sub(r'Console\.ReadLine\(\)', '_input', stripped, flags=re.IGNORECASE)
+            return (
+                f'{indent}string? _input = Console.ReadLine();\n'
+                f'{indent}if (_input == null) {{ Console.WriteLine("No input."); return; }}\n'
+                f'{indent}{replaced}'
+            )
+
+        # Division — add zero-check before the line
+        if re.search(r'\w+\s*/\s*(\w+)', stripped):
             m = re.search(r'/\s*(\w+)', stripped)
             denom = m.group(1) if m else "b"
-            return (f'{indent}if ({denom} == 0)\n'
-                    f'{indent}{{\n'
-                    f'{indent}    Console.WriteLine("Error: Cannot divide by zero.");\n'
-                    f'{indent}    return;\n'
-                    f'{indent}}}\n'
-                    f'{indent}{stripped}  // safe — zero-check added above')
+            return (
+                f'{indent}if ({denom} == 0) {{ Console.WriteLine("Cannot divide by zero."); return; }}\n'
+                f'{indent}{stripped}  // safe: zero-checked above'
+            )
 
-    # Python fixes
+    # ── Python fixes ─────────────────────────────────────────────────────
     if re.search(r'except\s*:', stripped.lower()):
-        return f'{indent}except (ValueError, TypeError) as e:\n{indent}    logger.error("Caught error: %s", e)\n{indent}    raise'
-    if re.search(r'except\s+exception', stripped.lower()):
-        return f'{indent}except (ValueError, KeyError, RuntimeError) as e:\n{indent}    logger.error("Unexpected error: %s", e)\n{indent}    raise'
+        return f'{indent}except (ValueError, TypeError) as e:  # Fixed: catch specific exceptions'
+    if re.search(r'except\s+exception\s*:', stripped.lower()):
+        return f'{indent}except (ValueError, KeyError, RuntimeError) as e:  # Fixed: specific exceptions'
     if re.search(r'==\s*none\b', stripped.lower()):
         fixed = re.sub(r'==\s*None', 'is None', stripped, flags=re.IGNORECASE)
         return f'{indent}{fixed}'
@@ -212,16 +241,20 @@ def _fix_for(pattern: str, buggy_line: str, file_path: str) -> Optional[str]:
     if re.search(r'\w+\s*/\s*\w+', stripped):
         m = re.search(r'/\s*(\w+)', stripped)
         denom = m.group(1) if m else "divisor"
-        return f'{indent}if {denom} == 0:\n{indent}    raise ValueError(f"Division by zero: {{{denom}}} cannot be zero")\n{indent}{stripped}  # safe'
+        return (
+            f'{indent}if {denom} == 0:\n'
+            f'{indent}    raise ValueError(f"{denom} cannot be zero")\n'
+            f'{indent}{stripped}  # safe'
+        )
 
-    # JS/TS fixes
+    # ── JS/TS fixes ───────────────────────────────────────────────────────
     if re.search(r'var\s+\w+', stripped.lower()):
         fixed = re.sub(r'\bvar\b', 'const', stripped)
-        return f'{indent}{fixed}  // Use const (or let if reassigned)'
+        return f'{indent}{fixed}  // Fixed: const instead of var'
     if re.search(r'console\.log\s*\(', stripped.lower()):
-        return f'{indent}// Removed debug log — use a proper logger:\n{indent}// logger.debug({stripped[stripped.find("(")+1:stripped.rfind(")")]})'
+        return f'{indent}// Removed: {stripped.strip()}'
 
-    return None  # No specific fix available
+    return None
 
 def generate_mock_review(diff_text: str, changed_lines: Dict[str, List[int]], guidelines_context: str = "") -> ReviewReportModel:
     """
