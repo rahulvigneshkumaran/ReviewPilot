@@ -3,10 +3,8 @@
   command = "npm run build"
   publish = ".next"
 
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
 
 [build.environment]
   NEXT_PUBLIC_API_URL = "https://reviewpilot-hvrp.onrender.com/api/v1"
