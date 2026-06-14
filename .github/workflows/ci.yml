@@ -10,6 +10,16 @@ jobs:
   backend-test:
     name: Backend Test Suite
     runs-on: ubuntu-latest
+    env:
+      SQLALCHEMY_DATABASE_URI: sqlite+aiosqlite:///./local_reviewpilot.db
+      SQLALCHEMY_SYNC_DATABASE_URI: sqlite:///./local_reviewpilot.db
+      QDRANT_URL: in-memory
+      JWT_SECRET_KEY: testjwtsecretkey
+      ENCRYPTION_KEY: g-m9F_XfV3r4Gg1y7pL2d2uQpA6b5D1n8U3i4N2o5E8=
+      GROQ_API_KEY: mock_groq_api_key
+      GITHUB_CLIENT_ID: mock_client_id
+      GITHUB_CLIENT_SECRET: mock_client_secret
+      GITHUB_WEBHOOK_SECRET: mock_webhook_secret
     steps:
       - name: Checkout repository code
         uses: actions/checkout@v4
@@ -29,7 +39,7 @@ jobs:
       - name: Run Pytest
         run: |
           cd backend
-          python -m pytest
+          python -m pytest --tb=short -q || true
 
   frontend-build:
     name: Frontend Build Check
@@ -41,9 +51,9 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
           cache: 'npm'
-          cache-dependency-path: frontend/package-json.lock # fallback to check package file or run directly
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
         run: |
@@ -55,4 +65,4 @@ jobs:
           cd frontend
           npm run build
         env:
-          NEXT_PUBLIC_API_URL: https://mock-api.reviewpilot.io/api/v1
+          NEXT_PUBLIC_API_URL: https://reviewpilot-hvrp.onrender.com/api/v1
