@@ -5,11 +5,15 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing_extensions import Annotated
 
 def parse_cors(v: Union[str, List[str]]) -> List[str]:
-    if isinstance(v, str) and not v.startswith("["):
-        return [i.strip() for i in v.split(",")]
-    elif isinstance(v, (list, str)):
+    if isinstance(v, str):
+        # Handle comma-separated string
+        if "," in v:
+            return [i.strip() for i in v.split(",")]
+        # Handle single URL string
+        return [v.strip()]
+    elif isinstance(v, list):
         return v
-    raise ValueError(v)
+    return []
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -67,7 +71,7 @@ class Settings(BaseSettings):
     GITHUB_PRIVATE_KEY: str = "mock_private_key"
 
     # Vector DB & Embeddings
-    QDRANT_URL: str = "http://localhost:6333"
+    QDRANT_URL: str = "in-memory"
     QDRANT_API_KEY: str | None = None
 
     # AI Reviews
