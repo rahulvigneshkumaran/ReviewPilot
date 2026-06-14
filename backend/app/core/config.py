@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     # CORS Origins
     BACKEND_CORS_ORIGINS: Annotated[
         List[str], BeforeValidator(parse_cors)
-    ] = ["http://localhost:3000", "http://localhost:8000"]
+    ] = ["http://localhost:3000", "http://localhost:8000", "https://review-pilot-a.netlify.app", "https://reviewpilot-hvrp.onrender.com"]
 
     # Security
     JWT_SECRET_KEY: str = "supersecretjwtkeyforreviewpilotdevelopmentonlychangeinprod"
