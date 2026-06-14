@@ -32,9 +32,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const login = () => {
-    // In a live system, this directs the user to the FastAPI backend GitHub OAuth callback route:
+    // Directs the user to the FastAPI backend GitHub OAuth route — uses env var in production
     if (typeof window !== "undefined") {
-      window.location.href = "http://localhost:8000/api/v1/auth/login";
+      const backendBase =
+        process.env.NEXT_PUBLIC_API_URL ??
+        "https://reviewpilot-hvrp.onrender.com/api/v1";
+      window.location.href = `${backendBase}/auth/login`;
     }
   };
 

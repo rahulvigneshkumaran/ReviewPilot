@@ -78,29 +78,47 @@ export default function RepositoriesPage() {
     setPatLoading(true);
     setPatError(null);
     try {
-      const res = await fetch("http://localhost:8000/api/v1/auth/dev-login", {
+      // Use env var for production URL — never hardcode localhost
+      const baseUrl =
+        process.env.NEXT_PUBLIC_API_URL ??
+        "https://reviewpilot-hvrp.onrender.com/api/v1";
+      const endpoint = `${baseUrl}/auth/dev-login`;
+      console.log("[PAT Login] POST", endpoint);
+
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ github_token: patValue.trim() }),
       });
+
+      // Log status so the real failure reason is visible in DevTools
+      console.log("[PAT Login] response status:", res.status, res.statusText);
+
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error((err as { detail?: string }).detail || "Login failed");
+        const errBody = await res.json().catch(() => ({}));
+        console.error("[PAT Login] error body:", errBody);
+        throw new Error(
+          (errBody as { detail?: string }).detail ||
+            `Server error ${res.status}: ${res.statusText}`
+        );
       }
-      const data = await res.json() as { access_token: string };
+      const data = (await res.json()) as { access_token: string };
       localStorage.setItem("access_token", data.access_token);
       setIsAuthenticated(true);
       setShowPatLogin(false);
       setPatValue("");
       // Reload repos with real data
-      const repos = await api.getRepositories();
-      setRepos(repos);
-      setShowConnectForm(repos.length === 0);
+      const freshRepos = await api.getRepositories();
+      setRepos(freshRepos);
+      setShowConnectForm(freshRepos.length === 0);
       // Clear all cached expansions so real data loads fresh on next expand
       setExpansions({});
       setExpandedRepoId(null);
     } catch (err: unknown) {
-      setPatError(err instanceof Error ? err.message : "Login failed");
+      console.error("[PAT Login] caught error:", err);
+      setPatError(
+        err instanceof Error ? err.message : "Login failed — check console for details"
+      );
     } finally {
       setPatLoading(false);
     }

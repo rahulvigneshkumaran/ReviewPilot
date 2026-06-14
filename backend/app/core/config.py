@@ -6,7 +6,7 @@ from typing_extensions import Annotated
 
 def parse_cors(v: Union[str, List[str]]) -> List[str]:
     if isinstance(v, str):
-        # Handle comma-separated string
+        # Handle comma-separated string (used in Render env var)
         if "," in v:
             return [i.strip() for i in v.split(",")]
         # Handle single URL string
@@ -25,12 +25,18 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
     PROJECT_NAME: str = "ReviewPilot"
 
-    # CORS Origins
+    # CORS Origins — override via BACKEND_CORS_ORIGINS env var on Render
+    # Set as a comma-separated string:  https://your-app.netlify.app,https://reviewpilot-hvrp.onrender.com
     BACKEND_CORS_ORIGINS: Annotated[
         List[str], BeforeValidator(parse_cors)
-    ] = ["http://localhost:3000", "http://localhost:8000", "https://review-pilot-a.netlify.app", "https://reviewpilot-hvrp.onrender.com"]
+    ] = [
+        "http://localhost:3000",
+        "http://localhost:8000",
+        "https://review-pilot-a.netlify.app",
+        "https://reviewpilot-hvrp.onrender.com",
+    ]
 
-    # Security
+    # Security — MUST be overridden via Render env vars in production
     JWT_SECRET_KEY: str = "supersecretjwtkeyforreviewpilotdevelopmentonlychangeinprod"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
@@ -66,7 +72,7 @@ class Settings(BaseSettings):
         data = info.data
         return f"postgresql://{data.get('POSTGRES_USER')}:{data.get('POSTGRES_PASSWORD')}@{data.get('POSTGRES_SERVER')}:{data.get('POSTGRES_PORT')}/{data.get('POSTGRES_DB')}"
 
-    # GitHub OAuth & Integration
+    # GitHub OAuth & Integration — set real values via Render env vars
     GITHUB_CLIENT_ID: str = "mock_client_id"
     GITHUB_CLIENT_SECRET: str = "mock_client_secret"
     GITHUB_APP_ID: str = "mock_app_id"
@@ -77,7 +83,7 @@ class Settings(BaseSettings):
     QDRANT_URL: str = "in-memory"
     QDRANT_API_KEY: str | None = None
 
-    # AI Reviews
+    # AI Reviews — set real GROQ_API_KEY via Render env vars
     GROQ_API_KEY: str = "mock_groq_api_key"
     GROQ_MODEL: str = "llama3-70b-8192"
 

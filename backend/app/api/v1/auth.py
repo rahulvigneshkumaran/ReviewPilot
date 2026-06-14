@@ -1,4 +1,5 @@
 from typing import List, Optional
+import logging
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
@@ -14,6 +15,8 @@ from app.core.exceptions import CredentialsException, UserNotFoundException
 from app.core.security import create_access_token, decode_access_token, encrypt_token
 from app.db.models import User
 from app.db.schemas import Token, UserOut
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -66,32 +69,64 @@ async def dev_login(
     credentials: DevLoginRequest,
     db: AsyncSession = Depends(get_db)
 ):
-    """Local development login using a GitHub Personal Access Token (PAT).
-    No OAuth App required — just paste your PAT with 'repo' scope."""
+    """Login using a GitHub Personal Access Token (PAT).
+    Works in both local development and production — no OAuth App required.
+    The PAT needs 'repo' scope to connect repositories."""
     github_token = credentials.github_token.strip()
     if not github_token:
         raise HTTPException(status_code=400, detail="github_token is required")
 
     # Validate token against GitHub API and fetch user profile
+    logger.info("dev-login: validating PAT against GitHub API")
     async with httpx.AsyncClient() as client:
-        user_response = await client.get(
-            "https://api.github.com/user",
-            headers={
-                "Authorization": f"token {github_token}",
-                "Accept": "application/json"
-            },
-            timeout=10.0
-        )
+        try:
+            user_response = await client.get(
+                "https://api.github.com/user",
+                headers={
+                    "Authorization": f"Bearer {github_token}",
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+                timeout=15.0
+            )
+        except httpx.TimeoutException:
+            logger.error("dev-login: GitHub API request timed out")
+            raise HTTPException(
+                status_code=504,
+                detail="GitHub API timed out. Please try again."
+            )
+        except httpx.RequestError as exc:
+            logger.error("dev-login: GitHub API network error: %s", exc)
+            raise HTTPException(
+                status_code=502,
+                detail=f"Could not reach GitHub API: {exc}"
+            )
+
+        logger.info("dev-login: GitHub API responded with status %d", user_response.status_code)
+
         if user_response.status_code == 401:
-            raise HTTPException(status_code=401, detail="Invalid GitHub token. Make sure your PAT has 'repo' scope.")
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid or expired GitHub token. Make sure your PAT has 'repo' scope and has not been revoked."
+            )
+        if user_response.status_code == 403:
+            raise HTTPException(
+                status_code=403,
+                detail="GitHub token was accepted but lacks required permissions. Ensure 'repo' scope is granted."
+            )
         if user_response.status_code != 200:
-            raise HTTPException(status_code=400, detail="Failed to verify token with GitHub API.")
+            logger.error("dev-login: unexpected GitHub status %d — %s", user_response.status_code, user_response.text)
+            raise HTTPException(
+                status_code=400,
+                detail=f"GitHub API returned unexpected status {user_response.status_code}."
+            )
 
         github_user = user_response.json()
         github_id = str(github_user.get("id"))
         github_username = github_user.get("login", "unknown")
         avatar_url = github_user.get("avatar_url", "")
         email = github_user.get("email") or f"{github_username}@users.noreply.github.com"
+        logger.info("dev-login: authenticated GitHub user '%s'", github_username)
 
     # Upsert user record
     query = select(User).where(User.github_id == github_id)
@@ -120,6 +155,7 @@ async def dev_login(
     await db.refresh(user)
 
     jwt_token = create_access_token(subject=user.id)
+    logger.info("dev-login: issued JWT for user '%s'", github_username)
     return {
         "access_token": jwt_token,
         "token_type": "bearer",
@@ -130,6 +166,7 @@ async def dev_login(
             "avatar_url": user.avatar_url
         }
     }
+
 
 
 @router.get("/callback")
