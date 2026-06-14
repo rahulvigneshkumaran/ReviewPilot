@@ -264,16 +264,17 @@ async def oauth_callback(
 
     # 5. Generate JWT token for dashboard session
     jwt_token = create_access_token(subject=user.id)
-    return {
-        "access_token": jwt_token,
-        "token_type": "bearer",
-        "user": {
-            "id": user.id,
-            "email": user.email,
-            "github_username": user.github_username,
-            "avatar_url": user.avatar_url
-        }
-    }
+
+    # 6. Redirect to frontend with JWT so the SPA can store it in localStorage
+    from urllib.parse import urlencode, quote
+    frontend_url = settings.FRONTEND_URL.rstrip("/")
+    params = urlencode({
+        "token": jwt_token,
+        "username": github_username or "",
+        "avatar": avatar_url or "",
+    }, quote_via=quote)
+    redirect_url = f"{frontend_url}/auth/callback?{params}"
+    return RedirectResponse(url=redirect_url, status_code=302)
 
 @router.get("/me", response_model=UserOut)
 async def get_me(current_user: User = Depends(get_current_user)):

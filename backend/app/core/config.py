@@ -79,6 +79,9 @@ class Settings(BaseSettings):
     GITHUB_WEBHOOK_SECRET: str = "mock_webhook_secret"
     GITHUB_PRIVATE_KEY: str = "mock_private_key"
 
+    # Frontend URL — used by OAuth callback to redirect back to the SPA
+    FRONTEND_URL: str = "http://localhost:3000"
+
     # Vector DB & Embeddings
     QDRANT_URL: str = "in-memory"
     QDRANT_API_KEY: str | None = None

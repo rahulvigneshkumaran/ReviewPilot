@@ -11,3 +11,5 @@ services:
         value: 3.11.3
       - key: API_V1_STR
         value: /api/v1
+      - key: FRONTEND_URL
+        value: https://review-pilot-a.netlify.app

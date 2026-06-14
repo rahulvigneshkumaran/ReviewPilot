@@ -8,11 +8,11 @@ class GitHubService:
         self.base_url = "https://api.github.com"
 
     def _get_headers(self, token: str, accept: str = "application/vnd.github.v3+json") -> Dict[str, str]:
-        # Classic PATs (ghp_) and fine-grained PATs (github_pat_) require "token" prefix.
-        # OAuth app tokens (gho_) also work with "token". "Bearer" causes 403 on write ops with PATs.
-        auth_prefix = "Bearer" if token.startswith("gho_") else "token"
+        # Use "token" prefix universally — it works for classic PATs (ghp_),
+        # fine-grained PATs (github_pat_), and OAuth app tokens (gho_) on all
+        # GitHub API endpoints including write operations (Contents, Pulls, etc.).
         return {
-            "Authorization": f"{auth_prefix} {token}",
+            "Authorization": f"token {token}",
             "Accept": accept,
             "User-Agent": "ReviewPilot-App"
         }

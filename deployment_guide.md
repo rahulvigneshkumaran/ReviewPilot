@@ -83,6 +83,7 @@ Configure the following inside Render Web Service **Environment**:
 | `GROQ_API_KEY` | `gsk_xxxxxxxxxxxxxx` | Llama API key validation |
 | `GROQ_MODEL` | `llama3-70b-8192` | Core LLM model choice |
 | `BACKEND_CORS_ORIGINS` | `https://your-vercel-domain.vercel.app` | Origins permitted for frontend dashboard access |
+| `FRONTEND_URL` | `https://your-frontend-domain.netlify.app` | Frontend URL for OAuth callback redirect after GitHub login |
 
 ### Next.js Frontend (Vercel)
 Configure the following inside Vercel Project **Settings > Environment Variables**:
