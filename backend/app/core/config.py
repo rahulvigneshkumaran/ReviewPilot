@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     @classmethod
     def assemble_db_connection(cls, v: str | None, info) -> str:
         if isinstance(v, str) and v:
+            # If it's a PostgreSQL URL, make sure it uses asyncpg
+            if v.startswith("postgresql://") and "+asyncpg" not in v:
+                return v.replace("postgresql://", "postgresql+asyncpg://")
             return v
         data = info.data
         return f"postgresql+asyncpg://{data.get('POSTGRES_USER')}:{data.get('POSTGRES_PASSWORD')}@{data.get('POSTGRES_SERVER')}:{data.get('POSTGRES_PORT')}/{data.get('POSTGRES_DB')}"
