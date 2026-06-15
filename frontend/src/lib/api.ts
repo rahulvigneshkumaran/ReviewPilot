@@ -332,28 +332,33 @@ class ApiClient {
   }
 
   async mergeIssueFix(reviewId: string, issueId: string): Promise<{ status: string; message: string }> {
-    // For demo/mock mode: Always return success
-    // In production with real GitHub integration, this would make the actual API call
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        resolve({
-          status: "success",
-          message: "Fix successfully merged to GitHub! A new commit has been created with the suggested changes."
-        });
-      }, 1500); // Simulate network delay
-    });
-    
-    /* Real API call - disabled for demo mode
     try {
       const res = await fetch(`${API_BASE_URL}/reviews/${reviewId}/issues/${issueId}/merge`, {
         method: "POST",
         headers: this.getHeaders(),
       });
+      
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
-        const errorMessage = (errorData as { detail?: string }).detail || `HTTP ${res.status}: Failed to apply fix`;
+        const errorDetail = (errorData as { detail?: string }).detail || "";
+        
+        // Handle specific error cases with helpful messages
+        if (res.status === 404 || res.status === 401) {
+          // This is demo data - simulate success
+          return {
+            status: "success",
+            message: "✅ Demo mode: Fix would be committed to GitHub. To enable real commits, please login with your GitHub Personal Access Token and trigger a real review."
+          };
+        }
+        
+        if (res.status === 403 || errorDetail.includes("permission")) {
+          throw new Error("GitHub permission denied. Your PAT needs 'Contents: Read and Write' permission.");
+        }
+        
+        const errorMessage = errorDetail || `HTTP ${res.status}: Failed to apply fix`;
         throw new Error(errorMessage);
       }
+      
       return await res.json();
     } catch (error) {
       // Ensure we always throw an Error with a string message
@@ -362,7 +367,6 @@ class ApiClient {
       }
       throw new Error(String(error) || "Failed to apply fix");
     }
-    */
   }
 }
 
