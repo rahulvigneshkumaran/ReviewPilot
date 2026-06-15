@@ -47,12 +47,12 @@ export default function IssueCard({ issue }: IssueCardProps) {
     setMergeResult(null);
     try {
       const result = await api.mergeIssueFix(issue.review_id, issue.id);
-      setMergeResult({ ok: true, message: result.message });
+      setMergeResult({ ok: result.status === "success" || result.status === "demo", message: result.message });
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       setMergeResult({
         ok: false,
-        message: errorMessage || "Failed to apply fix.",
+        message: errorMessage || "Failed to apply fix. Please try again or contact support.",
       });
     } finally {
       setMerging(false);
