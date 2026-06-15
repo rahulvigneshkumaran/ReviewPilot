@@ -49,9 +49,10 @@ export default function IssueCard({ issue }: IssueCardProps) {
       const result = await api.mergeIssueFix(issue.review_id, issue.id);
       setMergeResult({ ok: true, message: result.message });
     } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
       setMergeResult({
         ok: false,
-        message: err instanceof Error ? err.message : "Failed to apply fix.",
+        message: errorMessage || "Failed to apply fix.",
       });
     } finally {
       setMerging(false);
