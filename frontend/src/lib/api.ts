@@ -332,15 +332,24 @@ class ApiClient {
   }
 
   async mergeIssueFix(reviewId: string, issueId: string): Promise<{ status: string; message: string }> {
-    const res = await fetch(`${API_BASE_URL}/reviews/${reviewId}/issues/${issueId}/merge`, {
-      method: "POST",
-      headers: this.getHeaders(),
-    });
-    if (!res.ok) {
-      const errorData = await res.json().catch(() => ({}));
-      throw new Error((errorData as { detail?: string }).detail || "Failed to apply fix");
+    try {
+      const res = await fetch(`${API_BASE_URL}/reviews/${reviewId}/issues/${issueId}/merge`, {
+        method: "POST",
+        headers: this.getHeaders(),
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        const errorMessage = (errorData as { detail?: string }).detail || `HTTP ${res.status}: Failed to apply fix`;
+        throw new Error(errorMessage);
+      }
+      return await res.json();
+    } catch (error) {
+      // Ensure we always throw an Error with a string message
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error(String(error) || "Failed to apply fix");
     }
-    return await res.json();
   }
 }
 
