@@ -211,6 +211,14 @@ export default function RepositoriesPage() {
   const handleConnect = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newRepoName.trim()) return;
+    
+    // Check authentication before attempting to connect
+    if (!isAuthenticated) {
+      setConnectError("You must login with a GitHub Personal Access Token first to connect real repositories.");
+      setShowPatLogin(true);
+      return;
+    }
+    
     setConnectError(null);
     setIsSubmitting(true);
     try {
@@ -219,9 +227,14 @@ export default function RepositoriesPage() {
       setNewRepoName("");
       setShowConnectForm(false);
     } catch (err: unknown) {
-      setConnectError(
-        err instanceof Error ? err.message : "Failed to connect repository."
-      );
+      const errorMessage = err instanceof Error ? err.message : "Failed to connect repository.";
+      // Provide helpful context for authentication errors
+      if (errorMessage.includes("Unauthorized") || errorMessage.includes("401") || errorMessage.includes("not authenticated")) {
+        setConnectError("Authentication required. Please login with your GitHub Personal Access Token.");
+        setShowPatLogin(true);
+      } else {
+        setConnectError(errorMessage);
+      }
     } finally {
       setIsSubmitting(false);
     }
