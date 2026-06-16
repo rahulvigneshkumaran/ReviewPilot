@@ -349,12 +349,14 @@ class ApiClient {
       
       const data = await this.safeJsonParse<any[]>(res, []);
       
+      console.log("API getReviews - Raw response:", data);
+      
       if (!Array.isArray(data) || data.length === 0) {
-        console.log("No reviews from API, using mock data");
-        return this.getMockReviewData();
+        console.log("No reviews from API");
+        return [];
       }
       
-      return data.map((r: any) => ({
+      const reviewsData = data.map((r: any) => ({
         id: String(r.id),
         pull_request_id: String(r.pull_request_id),
         status: String(r.status || "COMPLETED") as any,
@@ -378,9 +380,14 @@ class ApiClient {
           context_diff: i.context_diff || undefined,
         })) : [],
       }));
+      
+      console.log("API getReviews - Processed reviews:", reviewsData.length);
+      console.log("API getReviews - First review issues:", reviewsData[0]?.issues);
+      
+      return reviewsData;
     } catch (error) {
-      console.warn("Failed to load reviews, using mock data:", this.errorToString(error));
-      return this.getMockReviewData();
+      console.error("API getReviews - Error:", this.errorToString(error));
+      return [];
     }
   }
 
